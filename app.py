@@ -172,7 +172,7 @@ if add_pet:
         st.success(f"Added {pet_name.strip()}.")
 
 if owner.pets:
-    st.dataframe(pet_rows(), use_container_width=True, hide_index=True)
+    st.dataframe(pet_rows(), width="stretch", hide_index=True)
 else:
     st.info("Add at least one pet to start building a schedule.")
 
@@ -235,7 +235,7 @@ if sort_mode == "Priority then time":
     filtered_tasks = scheduler.sort_by_priority_then_time(filtered_tasks)
 
 if filtered_tasks:
-    st.dataframe(task_rows(filtered_tasks), use_container_width=True, hide_index=True)
+    st.dataframe(task_rows(filtered_tasks), width="stretch", hide_index=True)
 else:
     st.info("No tasks match the current filters.")
 
@@ -280,13 +280,13 @@ if st.button("Generate schedule"):
             st.warning(warning)
 
     if plan:
-        st.dataframe(task_rows(plan), use_container_width=True, hide_index=True)
+        st.dataframe(task_rows(plan), width="stretch", hide_index=True)
     else:
         st.info("No pending tasks were scheduled for that date.")
 
     if scheduler.skipped:
         st.markdown("### Skipped Tasks")
-        st.dataframe(task_rows(scheduler.skipped), use_container_width=True, hide_index=True)
+        st.dataframe(task_rows(scheduler.skipped), width="stretch", hide_index=True)
 
         suggestions = scheduler.suggest_reschedule_slots()
         if suggestions:
@@ -298,7 +298,7 @@ if st.button("Generate schedule"):
                 }
                 for label, slot in suggestions.items()
             ]
-            st.dataframe(suggestion_rows, use_container_width=True, hide_index=True)
+            st.dataframe(suggestion_rows, width="stretch", hide_index=True)
 
     st.markdown("### Explanation")
     st.text(scheduler.explain_plan(schedule_date))
