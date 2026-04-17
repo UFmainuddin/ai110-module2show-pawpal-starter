@@ -1,0 +1,70 @@
+{
+  "name": "Jordan",
+  "available_minutes": 90,
+  "pets": [
+    {
+      "name": "Mochi",
+      "species": "dog",
+      "age": 3,
+      "tasks": [
+        {
+          "description": "Morning walk",
+          "time": "08:00",
+          "duration_minutes": 20,
+          "frequency": "daily",
+          "completed": false,
+          "due_date": "2026-04-17",
+          "priority": "high",
+          "pet_name": "Mochi"
+        },
+        {
+          "description": "Breakfast",
+          "time": "08:30",
+          "duration_minutes": 10,
+          "frequency": "daily",
+          "completed": false,
+          "due_date": "2026-04-17",
+          "priority": "high",
+          "pet_name": "Mochi"
+        },
+        {
+          "description": "Vet reminder",
+          "time": "15:00",
+          "duration_minutes": 30,
+          "frequency": "once",
+          "completed": false,
+          "due_date": "2026-04-17",
+          "priority": "medium",
+          "pet_name": "Mochi"
+        }
+      ]
+    },
+    {
+      "name": "Luna",
+      "species": "cat",
+      "age": 5,
+      "tasks": [
+        {
+          "description": "Medication",
+          "time": "08:00",
+          "duration_minutes": 5,
+          "frequency": "daily",
+          "completed": false,
+          "due_date": "2026-04-17",
+          "priority": "high",
+          "pet_name": "Luna"
+        },
+        {
+          "description": "Window play",
+          "time": "18:30",
+          "duration_minutes": 15,
+          "frequency": "once",
+          "completed": false,
+          "due_date": "2026-04-17",
+          "priority": "low",
+          "pet_name": "Luna"
+        }
+      ]
+    }
+  ]
+}

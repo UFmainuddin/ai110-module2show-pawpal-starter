@@ -2,14 +2,33 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from pathlib import Path
+
+
+PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+PRIORITY_WEIGHT = {"high": 3, "medium": 2, "low": 1}
 
 
 def _time_sort_key(value: str) -> tuple[int, int]:
     """Convert HH:MM text into a sortable tuple."""
     parsed = datetime.strptime(value, "%H:%M")
     return parsed.hour, parsed.minute
+
+
+def _minutes_from_time(value: str) -> int:
+    """Convert HH:MM text into total minutes."""
+    hour, minute = _time_sort_key(value)
+    return hour * 60 + minute
+
+
+def _time_from_minutes(value: int) -> str:
+    """Convert total minutes back into HH:MM text."""
+    hour = value // 60
+    minute = value % 60
+    return f"{hour:02d}:{minute:02d}"
 
 
 @dataclass
@@ -47,6 +66,34 @@ class Task:
             pet_name=self.pet_name,
         )
 
+    def to_dict(self) -> dict[str, object]:
+        """Convert the task into a JSON-safe dictionary."""
+        return {
+            "description": self.description,
+            "time": self.time,
+            "duration_minutes": self.duration_minutes,
+            "frequency": self.frequency,
+            "completed": self.completed,
+            "due_date": self.due_date.isoformat(),
+            "priority": self.priority,
+            "pet_name": self.pet_name,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> Task:
+        """Create a task from saved JSON data."""
+        due_date_text = str(data.get("due_date", date.today().isoformat()))
+        return cls(
+            description=str(data.get("description", "")),
+            time=str(data.get("time", "08:00")),
+            duration_minutes=int(data.get("duration_minutes", 0)),
+            frequency=str(data.get("frequency", "once")),
+            completed=bool(data.get("completed", False)),
+            due_date=date.fromisoformat(due_date_text),
+            priority=str(data.get("priority", "medium")),
+            pet_name=str(data.get("pet_name", "")),
+        )
+
 
 @dataclass
 class Pet:
@@ -69,6 +116,27 @@ class Pet:
     def incomplete_tasks(self) -> list[Task]:
         """Return only tasks that are not complete."""
         return [task for task in self.tasks if not task.completed]
+
+    def to_dict(self) -> dict[str, object]:
+        """Convert the pet and its tasks into a JSON-safe dictionary."""
+        return {
+            "name": self.name,
+            "species": self.species,
+            "age": self.age,
+            "tasks": [task.to_dict() for task in self.tasks],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> Pet:
+        """Create a pet from saved JSON data."""
+        pet = cls(
+            name=str(data.get("name", "")),
+            species=str(data.get("species", "other")),
+            age=int(data.get("age", 0)),
+        )
+        for task_data in data.get("tasks", []):
+            pet.add_task(Task.from_dict(task_data))
+        return pet
 
 
 class Owner:
@@ -99,6 +167,39 @@ class Owner:
             tasks.extend(pet.tasks)
         return tasks
 
+    def to_dict(self) -> dict[str, object]:
+        """Convert the owner and pets into a JSON-safe dictionary."""
+        return {
+            "name": self.name,
+            "available_minutes": self.available_minutes,
+            "pets": [pet.to_dict() for pet in self.pets],
+        }
+
+    def save_to_json(self, path: str | Path) -> None:
+        """Save the owner state to JSON."""
+        output_path = Path(path)
+        output_path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> Owner:
+        """Create an owner from saved JSON data."""
+        owner = cls(
+            name=str(data.get("name", "Jordan")),
+            available_minutes=int(data.get("available_minutes", 60)),
+        )
+        for pet_data in data.get("pets", []):
+            owner.add_pet(Pet.from_dict(pet_data))
+        return owner
+
+    @classmethod
+    def load_from_json(cls, path: str | Path) -> Owner | None:
+        """Load owner state from JSON when the file exists."""
+        input_path = Path(path)
+        if not input_path.exists():
+            return None
+        data = json.loads(input_path.read_text(encoding="utf-8"))
+        return cls.from_dict(data)
+
 
 class Scheduler:
     """Retrieve, organize, and explain tasks across pets."""
@@ -115,6 +216,20 @@ class Scheduler:
         return sorted(
             source,
             key=lambda task: (
+                task.due_date,
+                _time_sort_key(task.time),
+                task.pet_name.lower(),
+                task.description.lower(),
+            ),
+        )
+
+    def sort_by_priority_then_time(self, tasks: list[Task] | None = None) -> list[Task]:
+        """Return tasks sorted by priority first, then by time."""
+        source = self.owner.get_all_tasks() if tasks is None else tasks
+        return sorted(
+            source,
+            key=lambda task: (
+                PRIORITY_ORDER.get(task.priority, 99),
                 task.due_date,
                 _time_sort_key(task.time),
                 task.pet_name.lower(),
@@ -167,7 +282,7 @@ class Scheduler:
             for task in self.owner.get_all_tasks()
             if not task.completed and task.due_date == target
         ]
-        sorted_tasks = self.sort_by_time(candidates)
+        sorted_tasks = self.sort_by_priority_then_time(candidates)
         self.conflicts = self.detect_conflicts(sorted_tasks)
         self.plan = []
         self.skipped = []
@@ -181,6 +296,53 @@ class Scheduler:
                 self.skipped.append(task)
 
         return self.plan
+
+    def find_next_available_slot(
+        self,
+        duration_minutes: int,
+        target_date: date | None = None,
+        start_time: str = "06:00",
+        end_time: str = "22:00",
+    ) -> str | None:
+        """Find the next open slot that can fit a task duration."""
+        target = date.today() if target_date is None else target_date
+        busy_tasks = [
+            task
+            for task in self.owner.get_all_tasks()
+            if not task.completed and task.due_date == target
+        ]
+        ordered = self.sort_by_time(busy_tasks)
+        window_start = _minutes_from_time(start_time)
+        window_end = _minutes_from_time(end_time)
+        current = window_start
+
+        for task in ordered:
+            task_start = _minutes_from_time(task.time)
+            if task_start - current >= duration_minutes:
+                return _time_from_minutes(current)
+            task_end = task_start + task.duration_minutes
+            if task_end > current:
+                current = task_end
+
+        if window_end - current >= duration_minutes:
+            return _time_from_minutes(current)
+        return None
+
+    def suggest_reschedule_slots(
+        self,
+        tasks: list[Task] | None = None,
+        target_date: date | None = None,
+    ) -> dict[str, str | None]:
+        """Suggest a next available slot for each skipped or supplied task."""
+        source = self.skipped if tasks is None else tasks
+        suggestions: dict[str, str | None] = {}
+        for task in source:
+            label = f"{task.pet_name} | {task.description}"
+            suggestions[label] = self.find_next_available_slot(
+                task.duration_minutes,
+                task.due_date if target_date is None else target_date,
+            )
+        return suggestions
 
     def mark_task_complete(
         self,
@@ -227,7 +389,7 @@ class Scheduler:
         for task in self.plan:
             lines.append(
                 f"- {task.time} | {task.pet_name} | {task.description} | "
-                f"{task.duration_minutes} min | {task.frequency}"
+                f"{task.duration_minutes} min | {task.frequency} | {task.priority}"
             )
             total += task.duration_minutes
 
@@ -240,7 +402,7 @@ class Scheduler:
             for task in self.skipped:
                 lines.append(
                     f"- {task.time} | {task.pet_name} | {task.description} | "
-                    f"{task.duration_minutes} min"
+                    f"{task.duration_minutes} min | {task.priority}"
                 )
 
         if self.conflicts:

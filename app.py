@@ -1,23 +1,47 @@
 from datetime import date, time
+from pathlib import Path
 
 import streamlit as st
 
 from pawpal_system import Owner, Pet, Scheduler, Task
 
 
+DATA_FILE = Path("data.json")
+
+
 st.set_page_config(page_title="PawPal+", page_icon="P", layout="centered")
 
 
-DEFAULT_PET = Pet("Mochi", "dog", 3)
-DEFAULT_PET.add_task(Task("Morning walk", "08:00", 20, "daily", due_date=date.today()))
-DEFAULT_PET.add_task(Task("Breakfast", "08:30", 10, "daily", due_date=date.today()))
-DEFAULT_PET.add_task(Task("Vet reminder", "15:00", 30, "once", due_date=date.today()))
+def build_default_owner() -> Owner:
+    owner = Owner("Jordan", 90)
+
+    mochi = Pet("Mochi", "dog", 3)
+    mochi.add_task(
+        Task("Morning walk", "08:00", 20, "daily", due_date=date.today(), priority="high")
+    )
+    mochi.add_task(
+        Task("Breakfast", "08:30", 10, "daily", due_date=date.today(), priority="high")
+    )
+    mochi.add_task(
+        Task("Vet reminder", "15:00", 30, "once", due_date=date.today(), priority="medium")
+    )
+
+    luna = Pet("Luna", "cat", 5)
+    luna.add_task(
+        Task("Medication", "08:00", 5, "daily", due_date=date.today(), priority="high")
+    )
+    luna.add_task(
+        Task("Window play", "18:30", 15, "once", due_date=date.today(), priority="low")
+    )
+
+    owner.add_pet(mochi)
+    owner.add_pet(luna)
+    return owner
 
 
 if "owner" not in st.session_state:
-    owner = Owner("Jordan", 90)
-    owner.add_pet(DEFAULT_PET)
-    st.session_state.owner = owner
+    loaded_owner = Owner.load_from_json(DATA_FILE)
+    st.session_state.owner = loaded_owner if loaded_owner is not None else build_default_owner()
 
 
 owner: Owner = st.session_state.owner
@@ -28,10 +52,49 @@ def time_to_string(value: time) -> str:
     return value.strftime("%H:%M")
 
 
+def priority_badge(priority: str) -> str:
+    mapping = {
+        "high": "🔴 High",
+        "medium": "🟡 Medium",
+        "low": "🟢 Low",
+    }
+    return mapping.get(priority, priority.title())
+
+
+def frequency_badge(frequency: str) -> str:
+    mapping = {
+        "once": "📌 Once",
+        "daily": "🔁 Daily",
+        "weekly": "🗓️ Weekly",
+    }
+    return mapping.get(frequency, frequency.title())
+
+
+def task_icon(description: str) -> str:
+    lowered = description.lower()
+    if "walk" in lowered:
+        return "🚶"
+    if "med" in lowered:
+        return "💊"
+    if "feed" in lowered or "breakfast" in lowered or "dinner" in lowered:
+        return "🍽️"
+    if "groom" in lowered or "bath" in lowered:
+        return "🧼"
+    if "vet" in lowered:
+        return "🩺"
+    if "play" in lowered or "enrichment" in lowered:
+        return "🎾"
+    return "🐾"
+
+
+def save_owner_state() -> None:
+    owner.save_to_json(DATA_FILE)
+
+
 def pet_rows() -> list[dict[str, object]]:
     return [
         {
-            "Pet": pet.name,
+            "Pet": f"🐶 {pet.name}" if pet.species == "dog" else f"🐱 {pet.name}" if pet.species == "cat" else pet.name,
             "Species": pet.species,
             "Age": pet.age,
             "Tasks": pet.task_count(),
@@ -44,12 +107,13 @@ def task_rows(tasks: list[Task]) -> list[dict[str, object]]:
     return [
         {
             "Pet": task.pet_name,
-            "Task": task.description,
+            "Task": f"{task_icon(task.description)} {task.description}",
             "Date": task.due_date.isoformat(),
             "Time": task.time,
             "Duration": task.duration_minutes,
-            "Frequency": task.frequency,
-            "Status": "Done" if task.completed else "Pending",
+            "Priority": priority_badge(task.priority),
+            "Frequency": frequency_badge(task.frequency),
+            "Status": "✅ Done" if task.completed else "⏳ Pending",
         }
         for task in tasks
     ]
@@ -57,9 +121,18 @@ def task_rows(tasks: list[Task]) -> list[dict[str, object]]:
 
 st.title("PawPal+")
 st.markdown(
-    "A pet care planner that tracks multiple pets, sorts tasks by time, "
-    "flags conflicts, and handles recurring care tasks."
+    "A pet care planner that saves data to disk, sorts by priority and time, "
+    "flags conflicts, and suggests the next open slot when the day gets full."
 )
+
+metric_col1, metric_col2, metric_col3 = st.columns(3)
+metric_col1.metric("Pets", len(owner.pets))
+metric_col2.metric("All Tasks", len(owner.get_all_tasks()))
+metric_col3.metric(
+    "Pending Tasks",
+    len([task for task in owner.get_all_tasks() if not task.completed]),
+)
+st.caption("Priority legend: 🔴 High  |  🟡 Medium  |  🟢 Low")
 
 st.divider()
 
@@ -77,6 +150,7 @@ with col2:
             step=15,
         )
     )
+save_owner_state()
 
 st.divider()
 
@@ -94,10 +168,11 @@ if add_pet:
         st.warning("That pet name already exists.")
     else:
         owner.add_pet(Pet(pet_name.strip(), pet_species, int(pet_age)))
+        save_owner_state()
         st.success(f"Added {pet_name.strip()}.")
 
 if owner.pets:
-    st.table(pet_rows())
+    st.dataframe(pet_rows(), use_container_width=True, hide_index=True)
 else:
     st.info("Add at least one pet to start building a schedule.")
 
@@ -134,16 +209,19 @@ else:
                     priority=priority,
                 )
             )
+            save_owner_state()
             st.success(f"Added task for {selected_pet}.")
 
 st.divider()
 
 st.subheader("Task List")
-filter_col1, filter_col2 = st.columns(2)
+filter_col1, filter_col2, filter_col3 = st.columns(3)
 with filter_col1:
     pet_filter = st.selectbox("Filter by pet", ["All pets"] + [pet.name for pet in owner.pets])
 with filter_col2:
     status_filter = st.selectbox("Filter by status", ["All", "Pending", "Completed"])
+with filter_col3:
+    sort_mode = st.selectbox("Sort tasks", ["Priority then time", "Time only"])
 
 selected_completed = None
 if status_filter == "Pending":
@@ -153,9 +231,11 @@ elif status_filter == "Completed":
 
 selected_pet_name = None if pet_filter == "All pets" else pet_filter
 filtered_tasks = scheduler.filter_tasks(pet_name=selected_pet_name, completed=selected_completed)
+if sort_mode == "Priority then time":
+    filtered_tasks = scheduler.sort_by_priority_then_time(filtered_tasks)
 
 if filtered_tasks:
-    st.table(task_rows(filtered_tasks))
+    st.dataframe(task_rows(filtered_tasks), use_container_width=True, hide_index=True)
 else:
     st.info("No tasks match the current filters.")
 
@@ -179,6 +259,7 @@ else:
             chosen_task.time,
             chosen_task.due_date,
         )
+        save_owner_state()
         st.success("Task marked complete.")
         if new_task is not None:
             st.info(
@@ -199,18 +280,55 @@ if st.button("Generate schedule"):
             st.warning(warning)
 
     if plan:
-        st.table(task_rows(plan))
+        st.dataframe(task_rows(plan), use_container_width=True, hide_index=True)
     else:
         st.info("No pending tasks were scheduled for that date.")
 
     if scheduler.skipped:
         st.markdown("### Skipped Tasks")
-        st.table(task_rows(scheduler.skipped))
+        st.dataframe(task_rows(scheduler.skipped), use_container_width=True, hide_index=True)
+
+        suggestions = scheduler.suggest_reschedule_slots()
+        if suggestions:
+            st.markdown("### Next Available Slot Suggestions")
+            suggestion_rows = [
+                {
+                    "Task": label,
+                    "Suggested Start": slot if slot is not None else "No open slot left",
+                }
+                for label, slot in suggestions.items()
+            ]
+            st.dataframe(suggestion_rows, use_container_width=True, hide_index=True)
 
     st.markdown("### Explanation")
     st.text(scheduler.explain_plan(schedule_date))
 
+st.divider()
+
+st.subheader("Find Next Available Slot")
+slot_col1, slot_col2 = st.columns(2)
+with slot_col1:
+    slot_duration = int(
+        st.number_input(
+            "Minutes needed",
+            min_value=5,
+            max_value=240,
+            value=25,
+            step=5,
+            key="slot_duration",
+        )
+    )
+with slot_col2:
+    slot_date = st.date_input("Date to search", value=date.today(), key="slot_date")
+
+if st.button("Suggest slot"):
+    suggested_slot = scheduler.find_next_available_slot(slot_duration, slot_date)
+    if suggested_slot is None:
+        st.warning("No open slot was found in the default planning window of 06:00 to 22:00.")
+    else:
+        st.success(f"Suggested start time: {suggested_slot}")
+
 st.caption(
-    "Tasks are kept in Streamlit session state during your current browser session. "
-    "Recurring tasks are added automatically when daily or weekly tasks are marked complete."
+    "Tasks are saved to data.json automatically. Recurring tasks are added when daily or weekly "
+    "tasks are completed, and skipped tasks now get next-slot suggestions."
 )

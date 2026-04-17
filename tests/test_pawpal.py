@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from pathlib import Path
 
 from pawpal_system import Owner, Pet, Scheduler, Task
 
@@ -86,11 +87,56 @@ def test_generate_plan_skips_tasks_after_time_limit():
     owner = make_owner()
     mochi = owner.get_pet("Mochi")
     assert mochi is not None
-    mochi.add_task(Task("Walk", "07:30", 30, due_date=date.today()))
-    mochi.add_task(Task("Grooming", "08:30", 40, due_date=date.today()))
+    mochi.add_task(Task("Walk", "08:30", 30, due_date=date.today(), priority="low"))
+    mochi.add_task(Task("Medication", "07:30", 40, due_date=date.today(), priority="high"))
 
     scheduler = Scheduler(owner)
     plan = scheduler.generate_plan(date.today())
 
     assert len(plan) == 1
-    assert scheduler.skipped[0].description == "Grooming"
+    assert plan[0].description == "Medication"
+    assert scheduler.skipped[0].description == "Walk"
+
+
+def test_priority_sorting_happens_before_time_in_daily_plan():
+    owner = make_owner()
+    mochi = owner.get_pet("Mochi")
+    assert mochi is not None
+    mochi.add_task(Task("Low priority walk", "07:00", 15, due_date=date.today(), priority="low"))
+    mochi.add_task(Task("High priority medication", "09:00", 15, due_date=date.today(), priority="high"))
+
+    scheduler = Scheduler(owner)
+    plan = scheduler.generate_plan(date.today())
+
+    assert plan[0].description == "High priority medication"
+
+
+def test_find_next_available_slot_returns_open_gap():
+    owner = make_owner()
+    mochi = owner.get_pet("Mochi")
+    assert mochi is not None
+    mochi.add_task(Task("Walk", "08:00", 20, due_date=date.today()))
+    mochi.add_task(Task("Breakfast", "09:00", 15, due_date=date.today()))
+
+    scheduler = Scheduler(owner)
+    slot = scheduler.find_next_available_slot(30, date.today(), start_time="08:00", end_time="12:00")
+
+    assert slot == "08:20"
+
+
+def test_owner_can_save_and_load_json():
+    owner = make_owner()
+    mochi = owner.get_pet("Mochi")
+    assert mochi is not None
+    mochi.add_task(Task("Breakfast", "08:00", 10, "daily", due_date=date.today(), priority="high"))
+
+    file_path = Path("test_owner_data.json")
+    owner.save_to_json(file_path)
+    loaded = Owner.load_from_json(file_path)
+
+    assert loaded is not None
+    assert loaded.name == "Jordan"
+    assert loaded.get_pet("Mochi") is not None
+    loaded_mochi = loaded.get_pet("Mochi")
+    assert loaded_mochi is not None
+    assert loaded_mochi.tasks[0].description == "Breakfast"
